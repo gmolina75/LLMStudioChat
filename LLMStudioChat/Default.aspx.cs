@@ -1,168 +1,149 @@
 ﻿using System;
 using System.Configuration;
-using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Text;
-using System.Threading.Tasks;
 using System.Web;
 using System.Web.Script.Services;
 using System.Web.Services;
 using System.Web.UI;
+using Aurora.LLM;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 
 namespace LLMStudioChat
 {
     public partial class Default : Page
     {
-        private static readonly HttpClient _http;
-
-        static Default()
-        {
-            _http = new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
-            _http.DefaultRequestHeaders.Accept.Clear();
-            _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        }
-
         protected void Page_Load(object sender, EventArgs e) { }
 
         [WebMethod]
         [ScriptMethod(ResponseFormat = ResponseFormat.Json)]
-        public static async Task<string> Ask(string message)
+        public static string Ask(string message)
         {
-            // Config
-            var baseUrl = GetAppSetting("LLM_Studio_BaseUrl")?.TrimEnd('/');
+            // Config desde web.config
+            var providerStr = GetAppSetting("LLM_Provider") ?? "OpenAICompatible";
+            var baseUrl = GetAppSetting("LLM_Studio_BaseUrl") ?? "http://localhost:1234";
             var apiKey = GetAppSetting("LLM_Studio_ApiKey");
             var model = GetAppSetting("LLM_Studio_Model") ?? "llama-3.1-8b-instruct";
+            var apiVersion = GetAppSetting("LLM_Azure_ApiVersion") ?? "2024-02-15-preview";
             var system = GetAppSetting("LLM_SystemPrompt") ?? "Asistente técnico en español.";
             var tempStr = GetAppSetting("LLM_Temperature") ?? "0.2";
             var maxTokStr = GetAppSetting("LLM_MaxTokens") ?? "1024";
-
-            if (string.IsNullOrWhiteSpace(baseUrl))
-                return Fail("Configuración inválida: LLM_Studio_BaseUrl no está definido.", 500);
+            var toStr = GetAppSetting("LLM_TimeoutSeconds") ?? "45";
+            var retriesStr = GetAppSetting("LLM_MaxRetries") ?? "2";
+            var failEmpty = (GetAppSetting("LLM_FailOnEmptyContent") ?? "true").Equals("true", StringComparison.OrdinalIgnoreCase);
 
             if (string.IsNullOrWhiteSpace(message))
                 return Fail("Debes ingresar un mensaje.", 400);
 
-            if (!double.TryParse(tempStr, System.Globalization.NumberStyles.Any,
-                System.Globalization.CultureInfo.InvariantCulture, out var temperature))
+            Aurora.LLM.LLMGeneric.LLMProvider provider;
+            if (!Enum.TryParse(providerStr, true, out provider)) provider = Aurora.LLM.LLMGeneric.LLMProvider.OpenAICompatible;
+
+            double temperature;
+            if (!double.TryParse(tempStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out temperature))
                 temperature = 0.2;
 
-            if (!int.TryParse(maxTokStr, out var maxTokens))
-                maxTokens = 1024;
+            int maxTokens;
+            if (!int.TryParse(maxTokStr, out maxTokens)) maxTokens = 1024;
 
-            var endpoint = $"{baseUrl}/chat/completions";
+            int timeoutSec;
+            if (!int.TryParse(toStr, out timeoutSec)) timeoutSec = 45;
 
-            var payload = new
+            int maxRetries;
+            if (!int.TryParse(retriesStr, out maxRetries)) maxRetries = 2;
+
+            var options = new Aurora.LLM.LLMGeneric.LLMClientOptions
             {
-                model = model,
-                messages = new object[]
-                {
-                    new { role = "system", content = system },
-                    new { role = "user",   content = message }
-                },
-                temperature = temperature,
-                max_tokens = maxTokens,
-                stream = false
+                Provider = provider,
+                ApiKey = apiKey,
+                Model = model,               // En Azure: deploymentId
+                BaseUrl = baseUrl,           // Ej: http://localhost:1234 (LM Studio)
+                ApiVersion = apiVersion,     // Sólo Azure
+                Timeout = TimeSpan.FromSeconds(timeoutSec),
+                MaxRetries = maxRetries,
+                FailOnEmptyContent = failEmpty
             };
+
+            var client = new Aurora.LLM.LLMGeneric(options);
+
+            var req = new Aurora.LLM.LLMGeneric.LLMRequest
+            {
+                Temperature = temperature,
+                MaxTokens = maxTokens
+            };
+            // Inyecta system + user
+            req.Messages.Add(new Aurora.LLM.LLMGeneric.LLMMessage(Aurora.LLM.LLMGeneric.LLMRole.System, system));
+            req.Messages.Add(new Aurora.LLM.LLMGeneric.LLMMessage(Aurora.LLM.LLMGeneric.LLMRole.User, message));
 
             try
             {
-                var json = JsonConvert.SerializeObject(payload);
-                var content = new StringContent(json, Encoding.UTF8, "application/json");
+                var task = client.GenerateChatAsync(req);
+                task.Wait(); // WebMethod static: para simplificar sin async/await end-to-end
+                var res = task.Result;
 
-                using (var req = new HttpRequestMessage(HttpMethod.Post, endpoint))
+                if (res == null)
+                    return Fail("Respuesta nula del cliente LLM.", 502);
+
+                if (!res.IsSuccess)
                 {
-                    req.Content = content;
-                    if (!string.IsNullOrWhiteSpace(apiKey))
-                        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-
-                    var resp = await _http.SendAsync(req).ConfigureAwait(false);
-                    var body = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
-
-                    JToken tok = null;
-                    try { tok = JToken.Parse(body); } catch { /* no JSON */ }
-
-                    if (!resp.IsSuccessStatusCode)
+                    // Mapear a status adecuados
+                    var status = res.Error != null && res.Error.StatusCode.HasValue ? res.Error.StatusCode.Value : 502;
+                    var msg = res.Error != null ? res.Error.Message ?? "Error del modelo." : "Error del modelo.";
+                    if (res.Error != null && !string.IsNullOrWhiteSpace(res.Error.RawBody))
                     {
-                        // Error del backend LLM → 502
-                        var detail = ExtractErrorDetail(tok, body);
-                        return Fail($"Error del modelo: {detail}", 502);
+                        // Adjunta un extracto
+                        var raw = res.Error.RawBody;
+                        if (raw.Length > 800) raw = raw.Substring(0, 800) + " …";
+                        msg = $"{msg} | Detalle: {raw}";
                     }
 
-                    // 2xx → intenta leer contenido
-                    var text =
-                        tok?.SelectToken("choices[0].message.content")?.ToString()
-                        ?? tok?.SelectToken("choices[0].text")?.ToString()
-                        ?? tok?.SelectToken("response")?.ToString()
-                        ?? tok?.SelectToken("output")?.ToString()
-                        ?? string.Empty;
+                    // Heurística para timeouts/conexión caída
+                    if (res.Error != null && string.Equals(res.Error.Code, "timeout", StringComparison.OrdinalIgnoreCase))
+                        status = 504;
+                    if (res.Error != null && string.Equals(res.Error.Code, "unhandled_exception", StringComparison.OrdinalIgnoreCase)
+                        && (res.Error.RawBody ?? "").ToLowerInvariant().Contains("connection"))
+                        status = 503;
 
-                    if (!string.IsNullOrWhiteSpace(text))
-                        return text.Trim();
-
-                    var finish = tok?.SelectToken("choices[0].finish_reason")?.ToString();
-                    if (!string.IsNullOrWhiteSpace(finish))
-                        return $"(Sin contenido; finish_reason = {finish})";
-
-                    // Si llega aquí, respuesta vacía del modelo → 502
-                    var snippet = string.IsNullOrWhiteSpace(body) ? "(vacío)" : Trunc(body);
-                    return Fail($"Respuesta vacía/no interpretable del modelo. Cuerpo: {snippet}", 502);
+                    return Fail(msg, status);
                 }
+
+                // OK
+                var text = (res.Text ?? "").Trim();
+                if (string.IsNullOrWhiteSpace(text))
+                    return Fail("LLM Studio respondió vacío o no interpretable.", 502);
+
+                return text;
+            }
+            catch (AggregateException ae)
+            {
+                var ex = ae.Flatten().InnerException ?? ae;
+                return MapExceptionToFail(ex);
             }
             catch (Exception ex)
             {
-                var msg = ex.Message ?? string.Empty;
-                var lower = msg.ToLowerInvariant();
-
-                // Timeouts → 504
-                if (ex is TaskCanceledException || lower.Contains("timed out") || lower.Contains("timeout"))
-                    return Fail("Tiempo de espera agotado al consultar LLM Studio.", 504);
-
-                // Conexión rechazada / DNS / inaccesible → 503
-                if (ex is HttpRequestException ||
-                    lower.Contains("connection refused") ||
-                    lower.Contains("no such host") ||
-                    lower.Contains("name or service not known") ||
-                    lower.Contains("unable to connect") ||
-                    (lower.Contains("connect") && lower.Contains("failed")))
-                    return Fail("No es posible conectar con LLM Studio (servidor fuera de línea o inaccesible).", 503);
-
-                System.Diagnostics.Trace.WriteLine(
-                    $"[LLMStudio][{DateTime.UtcNow:o}] EXCEPTION {ex.GetType().Name}: {ex.Message}");
-                return Fail("Error al consultar LLM Studio: " + ex.Message, 500);
+                return MapExceptionToFail(ex);
             }
         }
 
-        // --- Helpers ----------------------------------------------------------
+        // ---------------- Helpers ----------------
 
-        private static string GetAppSetting(string key)
-            => ConfigurationManager.AppSettings[key];
-
-        private static string Trunc(string s, int max = 800)
-            => string.IsNullOrEmpty(s) ? s : (s.Length <= max ? s : s.Substring(0, max) + " …");
-
-        private static string ExtractErrorDetail(JToken tok, string raw)
+        private static string MapExceptionToFail(Exception ex)
         {
-            var errMsg = tok?.SelectToken("error.message")?.ToString();
-            var errType = tok?.SelectToken("error.type")?.ToString();
-            var errCode = tok?.SelectToken("error.code")?.ToString();
-            if (string.IsNullOrWhiteSpace(errMsg))
-                errMsg = tok?.SelectToken("message")?.ToString();
+            var msg = (ex.Message ?? "").ToLowerInvariant();
 
-            var detail = errMsg;
-            if (!string.IsNullOrWhiteSpace(errType)) detail = $"{detail} (tipo: {errType})";
-            if (!string.IsNullOrWhiteSpace(errCode)) detail = $"{detail} (código: {errCode})";
+            if (ex is System.Threading.Tasks.TaskCanceledException || msg.Contains("timed out") || msg.Contains("timeout"))
+                return Fail("Tiempo de espera agotado al consultar LLM Studio.", 504);
 
-            if (string.IsNullOrWhiteSpace(detail))
-                detail = string.IsNullOrWhiteSpace(raw) ? "(sin detalle)" : Trunc(raw);
+            if (ex is System.Net.Http.HttpRequestException ||
+                msg.Contains("connection refused") ||
+                msg.Contains("no such host") ||
+                msg.Contains("name or service not known") ||
+                msg.Contains("unable to connect") ||
+                (msg.Contains("connect") && msg.Contains("failed")))
+                return Fail("No es posible conectar con LLM Studio (servidor fuera de línea o inaccesible).", 503);
 
-            return detail;
+            return Fail("Error al consultar LLM Studio: " + (ex.Message ?? ex.GetType().Name), 500);
         }
 
         /// <summary>
         /// Devuelve un mensaje y fija el StatusCode HTTP para que jQuery dispare 'error'.
-        /// OJO: WebMethod retorna string, pero aún así podemos forzar código HTTP.
         /// </summary>
         private static string Fail(string message, int statusCode)
         {
@@ -171,16 +152,13 @@ namespace LLMStudioChat
             {
                 ctx.Response.StatusCode = statusCode;
                 ctx.Response.TrySkipIisCustomErrors = true;
-                // Content-Type JSON ayuda a que el front intente parsear
                 ctx.Response.ContentType = "application/json; charset=utf-8";
-                // Devolvemos un envoltorio simple por compatibilidad:
-                // jQuery error() leerá responseText y extractDetail lo mostrará.
                 ctx.Response.Write(JsonConvert.SerializeObject(new { message }));
-                // IMPORTANTE: terminar la respuesta para impedir que ASP.NET agregue su propio envoltorio
                 ctx.Response.End();
             }
-            // Valor de retorno por contrato (no se usará si Response.End() ya cortó el pipeline)
             return message;
         }
+
+        private static string GetAppSetting(string key) => ConfigurationManager.AppSettings[key];
     }
 }

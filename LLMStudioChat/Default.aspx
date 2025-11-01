@@ -71,22 +71,6 @@
           $log.scrollTop($log[0].scrollHeight);
       }
 
-      function explainAjaxError(xhr, textStatus, errorThrown) {
-          if (!navigator.onLine) return "Sin conexión a Internet.";
-          if (textStatus === "timeout") return "Tiempo de espera agotado al contactar el servidor.";
-
-          if (!xhr) return "Error desconocido (sin detalles).";
-          if (xhr.status === 0) {
-              return "No fue posible conectar con el servidor (servidor fuera de línea, CORS o bloqueado por red).";
-          }
-          if (xhr.status === 404) return "Servicio no encontrado (404). Verifica la ruta 'Default.aspx/Ask'.";
-          if (xhr.status === 502) return "Error del modelo (502). " + extractDetail(xhr);
-          if (xhr.status === 503) return "LLM Studio no está disponible (503). " + extractDetail(xhr);
-          if (xhr.status === 504) return "Tiempo de espera con LLM Studio (504). " + extractDetail(xhr);
-
-          return `Fallo de red: ${xhr.status} ${xhr.statusText || ""}. ${extractDetail(xhr)}`.trim();
-      }
-
       function extractDetail(xhr) {
           try {
               const ct = xhr.getResponseHeader("Content-Type") || "";
@@ -102,6 +86,18 @@
               return "Detalle: " + (t.length > 300 ? t.substring(0, 300) + " …" : t);
           }
           return "";
+      }
+
+      function explainAjaxError(xhr, textStatus, errorThrown) {
+          if (!navigator.onLine) return "Sin conexión a Internet.";
+          if (textStatus === "timeout") return "Tiempo de espera agotado al contactar el servidor.";
+          if (!xhr) return "Error desconocido (sin detalles).";
+          if (xhr.status === 0) return "No fue posible conectar con el servidor (fuera de línea o bloqueado).";
+          if (xhr.status === 404) return "Servicio no encontrado (404). Verifica 'Default.aspx/Ask'.";
+          if (xhr.status === 502) return "Error del modelo (502). " + extractDetail(xhr);
+          if (xhr.status === 503) return "LLM Studio no está disponible (503). " + extractDetail(xhr);
+          if (xhr.status === 504) return "Tiempo de espera con LLM Studio (504). " + extractDetail(xhr);
+          return `Fallo de red: ${xhr.status} ${xhr.statusText || ""}. ${extractDetail(xhr)}`.trim();
       }
 
       function sendMessage() {

@@ -133,6 +133,12 @@
     <Folder Include="App_Data\" />
     <Folder Include="Models\" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\win32\GEN_MODULES\APIREST\Aurora.LLM\Aurora.LLM.csproj">
+      <Project>{4c050e88-c243-4311-84a9-32dfc6d2a819}</Project>
+      <Name>Aurora.LLM</Name>
+    </ProjectReference>
+  </ItemGroup>
   <PropertyGroup>
     <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>
     <VSToolsPath Condition="'$(VSToolsPath)' == ''">$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)</VSToolsPath>

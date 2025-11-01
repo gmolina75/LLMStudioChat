@@ -5,6 +5,8 @@ VisualStudioVersion = 17.14.36616.10 d17.14
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LLMStudioChat", "LLMStudioChat\LLMStudioChat.csproj", "{683297D1-4048-4CA9-860B-C0CA7EA7F228}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Aurora.LLM", "..\..\win32\GEN_MODULES\APIREST\Aurora.LLM\Aurora.LLM.csproj", "{4C050E88-C243-4311-84A9-32DFC6D2A819}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +17,10 @@ Global
 		{683297D1-4048-4CA9-860B-C0CA7EA7F228}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{683297D1-4048-4CA9-860B-C0CA7EA7F228}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{683297D1-4048-4CA9-860B-C0CA7EA7F228}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4C050E88-C243-4311-84A9-32DFC6D2A819}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4C050E88-C243-4311-84A9-32DFC6D2A819}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4C050E88-C243-4311-84A9-32DFC6D2A819}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4C050E88-C243-4311-84A9-32DFC6D2A819}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
