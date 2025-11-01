@@ -33,8 +33,8 @@ namespace LLMStudioChat
             if (string.IsNullOrWhiteSpace(message))
                 return Fail("Debes ingresar un mensaje.", 400);
 
-            Aurora.LLM.LLMGeneric.LLMProvider provider;
-            if (!Enum.TryParse(providerStr, true, out provider)) provider = Aurora.LLM.LLMGeneric.LLMProvider.OpenAICompatible;
+            LLMGeneric.LLMProvider provider;
+            if (!Enum.TryParse(providerStr, true, out provider)) provider = LLMGeneric.LLMProvider.OpenAICompatible;
 
             double temperature;
             if (!double.TryParse(tempStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out temperature))
@@ -49,7 +49,7 @@ namespace LLMStudioChat
             int maxRetries;
             if (!int.TryParse(retriesStr, out maxRetries)) maxRetries = 2;
 
-            var options = new Aurora.LLM.LLMGeneric.LLMClientOptions
+            var options = new LLMGeneric.LLMClientOptions
             {
                 Provider = provider,
                 ApiKey = apiKey,
@@ -61,16 +61,16 @@ namespace LLMStudioChat
                 FailOnEmptyContent = failEmpty
             };
 
-            var client = new Aurora.LLM.LLMGeneric(options);
+            var client = new LLMGeneric(options);
 
-            var req = new Aurora.LLM.LLMGeneric.LLMRequest
+            var req = new LLMGeneric.LLMRequest
             {
                 Temperature = temperature,
                 MaxTokens = maxTokens
             };
             // Inyecta system + user
-            req.Messages.Add(new Aurora.LLM.LLMGeneric.LLMMessage(Aurora.LLM.LLMGeneric.LLMRole.System, system));
-            req.Messages.Add(new Aurora.LLM.LLMGeneric.LLMMessage(Aurora.LLM.LLMGeneric.LLMRole.User, message));
+            req.Messages.Add(new LLMGeneric.LLMMessage(LLMGeneric.LLMRole.System, system));
+            req.Messages.Add(new LLMGeneric.LLMMessage(LLMGeneric.LLMRole.User, message));
 
             try
             {
